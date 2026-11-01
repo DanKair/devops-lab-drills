@@ -1,0 +1,25 @@
+- name: Deploy status page
+  hosts: webservers
+  tasks:
+    - name: Install nginx
+      ansible.builtin.apt:
+        name: nginx
+        state: present
+        update_cache: true
+
+    - name: Write status page
+      ansible.builtin.copy:
+        content: "OK"
+        dest: /var/www/html/status.html
+      notify: restart nginx
+
+    - name: Start nginx
+      ansible.builtin.service:
+        name: nginx
+        state: start
+
+  handlers:
+    - name: Restart nginx
+      ansible.builtin.service:
+        name: nginx
+        state: restarted

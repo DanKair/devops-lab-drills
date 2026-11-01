@@ -1,0 +1,56 @@
+id: k8s-fix-02
+title: 'Break-fix: the Service with no endpoints'
+track: k8s
+order: 16
+minutes: 30
+breakfix: true
+scenario: Every pod of `shop` is Running and ready, yet `curl` to the Service times out. The developer swears "it works in the pod".
+steps:
+- text: Run `lab start k8s-fix-02`. It applies these manifests to namespace `lab` (shown here for reference; you fix them with `kubectl edit` or by editing your own copy and re-applying).
+  code: |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata: { name: shop }
+    spec:
+      replicas: 2
+      selector: { matchLabels: { app: shop, tier: frontend } }
+      template:
+        metadata: { labels: { app: shop, tier: frontend } }
+        spec:
+          containers:
+            - name: web
+              image: nginx:1.27-alpine
+              ports: [{ containerPort: 80 }]
+    ---
+    apiVersion: v1
+    kind: Service
+    metadata: { name: shop }
+    spec:
+      selector: { app: shop-frontend }
+      ports:
+        - port: 80
+          targetPort: 8080
+  lang: shop.yaml
+- text: Test from inside the cluster, the way other services would call it.
+  code: |
+    kubectl run tmp --rm -it --image=busybox:1.36 --restart=Never -- sh
+    # inside the pod:
+    nslookup shop
+    wget -qO- -T 3 http://shop
+  lang: node1
+- text: 'Follow the chain: DNS → Service → endpoints → pod labels → container port.'
+  code: |
+    kubectl get endpointslices -l kubernetes.io/service-name=shop
+    kubectl get pods --show-labels -l app=shop
+    kubectl describe svc shop
+  lang: node1
+- text: Fix both bugs and re-test with the busybox pod.
+verify:
+- run: kubectl get endpointslices -l kubernetes.io/service-name=shop
+  expect: Two pod IPs listed, with port 80.
+- run: kubectl run t --rm -it --image=busybox:1.36 --restart=Never -- wget -qO- http://shop
+  expect: nginx welcome HTML.
+hints:
+- DNS resolves, so the Service exists. Empty endpoints means the selector matches no pods. Once endpoints appear, check which port the traffic is sent to.
+solution:
+- text: 'Fixes: the Service selector must match pod labels, for example `{ app: shop, tier: frontend }` or just `{ app: shop }`; `targetPort` must be `80`, where nginx listens.'

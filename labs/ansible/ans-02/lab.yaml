@@ -1,0 +1,71 @@
+id: ans-02
+title: 'Your first playbook: nginx on the web group'
+track: ansible
+order: 4
+minutes: 40
+breakfix: false
+scenario: Ad-hoc commands are not repeatable or reviewable. The team wants the web server setup stored in Git as a playbook that anyone can re-run safely.
+steps:
+- text: Write `site.yml`. Always use fully qualified module names such as `ansible.builtin.apt`.
+  code: |
+    - name: Configure web servers
+      hosts: web
+      become: true
+      tasks:
+        - name: Install nginx
+          ansible.builtin.apt:
+            name: nginx
+            state: present
+            update_cache: true
+            cache_valid_time: 3600
+
+        - name: Deploy homepage
+          ansible.builtin.copy:
+            content: "Hello from {{ inventory_hostname }}\n"
+            dest: /var/www/html/index.html
+            mode: "0644"
+
+        - name: Ensure nginx is running and enabled
+          ansible.builtin.service:
+            name: nginx
+            state: started
+            enabled: true
+  lang: site.yml
+- text: 'Check before you change anything: syntax first, then a dry run with diffs.'
+  code: |
+    ansible-playbook site.yml --syntax-check
+    ansible-playbook site.yml --check --diff
+  lang: control
+- text: Apply it, then run it a second time. Compare the `PLAY RECAP` lines.
+  code: |
+    ansible-playbook site.yml
+    ansible-playbook site.yml
+  lang: control
+- text: Edit `/var/www/html/index.html` by hand on node1 (`ssh node1`), then re-run the playbook with `--diff`. Ansible puts the file back. This is how config management fixes drift.
+- text: '**Challenge:** add a second play for the `db` group that installs `chrony` and makes sure it is running. Run only that play with `--limit db`.'
+verify:
+- run: curl -s http://node1
+  expect: '`Hello from node1`'
+- run: ansible-playbook site.yml | tail -3
+  expect: '`node1 : ok=4 changed=0 ... failed=0` on the second run.'
+hints:
+- 'YAML is indentation-sensitive: `- name:` under `tasks:` must be indented consistently with spaces, never tabs.'
+- '`--check` may fail on the service task if nginx is not installed yet, because the dry run did not really install it. That is expected on the first run.'
+solution:
+- text: 'Challenge play to append to site.yml:'
+  code: |
+    - name: Configure database servers
+      hosts: db
+      become: true
+      tasks:
+        - name: Install chrony
+          ansible.builtin.apt:
+            name: chrony
+            state: present
+            update_cache: true
+        - name: Run chrony
+          ansible.builtin.service:
+            name: chrony
+            state: started
+            enabled: true
+  lang: site.yml

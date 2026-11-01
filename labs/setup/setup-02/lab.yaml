@@ -1,0 +1,47 @@
+id: setup-02
+title: 'Light alternative: WSL2 + Docker'
+track: setup
+order: 2
+minutes: 30
+breakfix: false
+scenario: Your laptop has 8 GB of RAM and VirtualBox is slow next to Hyper-V. You need a lighter setup for Terraform, Kubernetes and GitLab CI. The Ansible track still works best on the Vagrant VMs, because containers have no systemd.
+steps:
+- text: Install WSL2 with Ubuntu from an admin PowerShell, then open the Ubuntu terminal.
+  code: |
+    wsl --install -d Ubuntu-24.04
+  lang: PowerShell
+- text: Install Docker Engine inside WSL and let your user run it without sudo. Close and reopen the terminal afterwards so the group change applies.
+  code: |
+    curl -fsSL https://get.docker.com | sudo sh
+    sudo usermod -aG docker $USER
+    # reopen the terminal, then:
+    docker run --rm hello-world
+  lang: wsl
+- text: Install `kubectl` and `kind`, which runs Kubernetes nodes as Docker containers. Then create a cluster.
+  code: |
+    curl -LO "https://dl.k8s.io/release/$(curl -Ls https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+    sudo install kubectl /usr/local/bin/ && rm kubectl
+    curl -Lo kind https://kind.sigs.k8s.io/dl/latest/kind-linux-amd64
+    sudo install kind /usr/local/bin/ && rm kind
+    kind create cluster --name lab
+    kubectl get nodes
+  lang: wsl
+- text: Install Ansible with pipx, so it does not conflict with system Python.
+  code: |
+    sudo apt update && sudo apt install -y pipx
+    pipx ensurepath
+    pipx install --include-deps ansible
+  lang: wsl
+- text: 'Map the labs to this setup: **Terraform** works unchanged. **Kubernetes**: wherever a lab uses `192.168.56.11:30080`, use `kubectl port-forward svc/<name> 8080:80` and open `localhost:8080`. **GitLab runner**: install it in WSL instead of node2.'
+verify:
+- run: docker ps
+  expect: No permission error. You see the `lab-control-plane` container from kind.
+- run: kubectl get nodes
+  expect: '`lab-control-plane   Ready   control-plane`'
+hints:
+- '"Cannot connect to the Docker daemon" right after install: start it with `sudo service docker start`, or enable systemd in `/etc/wsl.conf` under `[boot] systemd=true` and then run `wsl --shutdown`.'
+solution:
+- text: 'To reset the cluster, delete and recreate it:'
+  code: |
+    kind delete cluster --name lab && kind create cluster --name lab
+  lang: wsl

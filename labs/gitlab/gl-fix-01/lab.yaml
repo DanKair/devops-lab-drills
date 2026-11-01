@@ -1,0 +1,55 @@
+id: gl-fix-01
+title: 'Break-fix: the pipeline that never builds'
+track: gitlab
+order: 20
+minutes: 35
+breakfix: true
+scenario: A teammate copied a pipeline from another team. It either refuses to start or the build job fails. Find all **five** problems. Some are rejected by the linter, some only show up at runtime.
+steps:
+- text: 'Run `lab start gl-fix-01`. It creates branch `fix/pipeline` in `~/gitlab-app`, backs up your pipeline to `.gitlab-ci.yml.bak`, and writes this file:'
+  code: |
+    stages:
+      - test
+      - build
+
+    unit-tests:
+      stage: tests
+      image: python:3.12-slim
+      tags: [docker-lab]
+      script:
+        - pip install -r requirements-dev.txt
+        - pytest
+
+    build-image:
+      stage: build
+      image: docker:27
+      tags: [lab]
+      script:
+        - docker build -t $CI_REGISTRY_IMAGE:latest .
+        - docker push $CI_REGISTRY_IMAGE:latest
+      only:
+        - main
+      rules:
+        - if: $CI_COMMIT_BRANCH == "main"
+  lang: .gitlab-ci.yml
+- text: Paste it into the Pipeline editor first and fix what the linter reports.
+- text: Push and fix what happens at runtime. To test the build job on your branch, change its rule to your branch name temporarily.
+- text: Write down each bug as "symptom → cause → fix".
+verify:
+- run: Pipeline editor
+  expect: '"This GitLab CI configuration is valid."'
+- run: Pipeline run
+  expect: unit-tests runs on node2; build-image pushes the image.
+hints:
+- 'Linter error 1: "chosen stage does not exist". Compare against `stages:`.'
+- 'Linter error 2: two keywords that control when a job runs cannot be combined. Keep the modern one.'
+- 'Runtime 1: the job is stuck. What tags does your runner have?'
+- 'Runtime 2 and 3: the build job has no Docker daemon and is not logged in to the registry. Look back at lab 3.'
+solution:
+- text: |-
+    Fixes:
+    1. `stage: tests` → `test`.
+    2. Remove `only:`; keep `rules:` (they cannot be used together).
+    3. `tags: [docker-lab]` → `[lab]`.
+    4. Add `services: [docker:27-dind]` and `DOCKER_TLS_CERTDIR: "/certs"`.
+    5. Add the `docker login` before_script using `$CI_REGISTRY_*`. Bonus: tag with `$CI_COMMIT_SHORT_SHA` instead of `latest`.

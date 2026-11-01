@@ -1,0 +1,95 @@
+id: gl-01
+title: From GitHub Actions to your first .gitlab-ci.yml
+track: gitlab
+order: 17
+minutes: 50
+breakfix: false
+scenario: 'The company runs GitLab. Your Python service has a GitHub Actions workflow you understand well. Rebuild it as a GitLab pipeline: lint, then test, with test reports visible in merge requests.'
+steps:
+- text: |-
+    Learn the mapping. Most concepts translate one to one.
+
+    | GitHub Actions | GitLab CI |
+    |---|---|
+    | .github/workflows/*.yml | one .gitlab-ci.yml at the repo root (split with include:) |
+    | jobs.&lt;id&gt; | a top-level key = a job |
+    | needs / job order | stages: (order) and needs: (DAG) |
+    | runs-on | tags: picks the runner; image: picks the container |
+    | steps: - run: | script: (also before_script / after_script) |
+    | uses: actions/checkout | automatic, the repo is cloned for you |
+    | secrets.X / env: | CI/CD variables (Settings → CI/CD), used as $X; variables: |
+    | if: | rules: - if: |
+    | upload-artifact / cache action | artifacts: / cache: |
+    | strategy.matrix | parallel: matrix: |
+- text: Create a free account on gitlab.com and a new blank project. To use GitLab's shared runners, new accounts must complete identity verification. If you would rather not, do the next lab first and use your own runner.
+- text: Clone the project on `control` to `~/gitlab-app`, and connect the CLI to GitLab so `lab check` can read your pipelines. Create a personal access token with only the `read_api` scope (User settings → Access tokens) and give it a short expiry.
+  code: |-
+    git clone https://gitlab.com/<you>/<project>.git ~/gitlab-app
+    lab config set gitlab_project <you>/<project>
+    lab config set gitlab_token   # prompts, input hidden
+    lab doctor
+  lang: control
+- text: Add a tiny Python app.
+  code: |
+    def add(a: int, b: int) -> int:
+        return a + b
+  lang: app.py
+- text: ''
+  code: |
+    from app import add
+
+
+    def test_add():
+        assert add(2, 3) == 5
+  lang: test_app.py
+- text: ''
+  code: |
+    pytest==8.3.3
+    ruff==0.6.9
+  lang: requirements-dev.txt
+- text: Write the pipeline.
+  code: |
+    stages:
+      - lint
+      - test
+
+    default:
+      image: python:3.12-slim
+
+    variables:
+      PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+    cache:
+      key:
+        files: [requirements-dev.txt]
+      paths: [.cache/pip]
+
+    lint:
+      stage: lint
+      script:
+        - pip install -r requirements-dev.txt
+        - ruff check .
+
+    test:
+      stage: test
+      script:
+        - pip install -r requirements-dev.txt
+        - pytest --junitxml=report.xml
+      artifacts:
+        when: always
+        reports:
+          junit: report.xml
+  lang: .gitlab-ci.yml
+- text: Before pushing, validate the file in **Build → Pipeline editor**, which lints as you type. Then push and open **Build → Pipelines**.
+- text: Break a test (expect 6), open a merge request, and find the failed test in the MR's test summary. Fix it.
+- text: '**Challenge:** translate one real GitHub Actions workflow from your own projects to GitLab.'
+verify:
+- run: Build → Pipelines
+  expect: Two stages, both green. Cache "Created cache" on the first run, "Successfully extracted cache" on the next.
+- run: Pipeline → Tests tab
+  expect: 1 test, 0 failures.
+hints:
+- 'Job stuck "pending" with "no active runners": shared runners need account verification, or set up your own runner (next lab).'
+- '`ruff: command not found` in the test job: each job runs in a fresh container, so install dependencies in every job (or in `default: before_script`).'
+solution:
+- text: 'Clean up the repetition with `default: before_script: [pip install -r requirements-dev.txt]` and remove the pip line from both jobs.'

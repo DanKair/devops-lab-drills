@@ -1,0 +1,71 @@
+id: gl-03
+title: Build, scan and push an image to the GitLab registry
+track: gitlab
+order: 19
+minutes: 60
+breakfix: false
+scenario: Every commit to `main` should produce a container image tagged with the commit SHA. MR pipelines should test but never push. Add GitLab's free security scanners.
+steps:
+- text: Add a Dockerfile that runs as a non-root user.
+  code: |
+    FROM python:3.12-slim
+    WORKDIR /app
+    COPY app.py .
+    RUN useradd --system --uid 10001 app
+    USER 10001
+    EXPOSE 8000
+    CMD ["python", "-m", "http.server", "8000"]
+  lang: Dockerfile
+- text: Docker-in-Docker needs a privileged runner. On node2, edit `/etc/gitlab-runner/config.toml` in the `[runners.docker]` section, then run `sudo gitlab-runner restart`.
+  code: |2
+      privileged = true
+      volumes = ["/certs/client", "/cache"]
+  lang: config.toml
+- text: 'Extend the pipeline: workflow rules (one pipeline per MR, no duplicates), a build stage, and security templates.'
+  code: |
+    workflow:
+      rules:
+        - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+        - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+          when: never
+        - if: $CI_COMMIT_BRANCH
+
+    stages: [lint, test, build]
+
+    include:
+      - template: Jobs/SAST.gitlab-ci.yml
+      - template: Jobs/Secret-Detection.gitlab-ci.yml
+
+    build:
+      stage: build
+      image: docker:27
+      services:
+        - docker:27-dind
+      variables:
+        DOCKER_TLS_CERTDIR: "/certs"
+      before_script:
+        - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+      script:
+        - docker build -t "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA" .
+        - docker push "$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA"
+      rules:
+        - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  lang: .gitlab-ci.yml (additions)
+- text: 'Push to a branch and open an MR: the build job must not appear. Merge it: the build job runs and the image shows up in **Deploy → Container registry**.'
+- text: Pull the image on node1 or control and run it. For a private project, log in first with a **deploy token** (Settings → Repository → Deploy tokens, scope `read_registry`).
+  code: |
+    docker login registry.gitlab.com   # deploy token user + token
+    docker run -d -p 8000:8000 registry.gitlab.com/<you>/<project>:<sha>
+    curl -s localhost:8000 | head -3
+  lang: control
+- text: '**Stretch:** commit a fake AWS key like `AKIAIOSFODNN7EXAMPLE` on a branch and see whether secret detection reports it. Then remove it.'
+verify:
+- run: Pipeline on main
+  expect: lint → test (+ sast / secret_detection jobs) → build, all green.
+- run: Deploy → Container registry
+  expect: A tag that equals the 8-character commit SHA.
+hints:
+- '"Cannot connect to the Docker daemon at tcp://docker:2376": the runner is not privileged, or `/certs/client` is missing from volumes.'
+- '`$CI_REGISTRY_PASSWORD` and friends are predefined. You do not create them yourself.'
+solution:
+- text: 'Why the SHA tag instead of `latest`: it is immutable and traceable, so you always know which commit is running and can roll back to an exact build.'

@@ -1,0 +1,43 @@
+id: k8s-01
+title: Install k3s and work with pods
+track: k8s
+order: 12
+minutes: 50
+breakfix: false
+scenario: The team is moving from "containers on a VM" to Kubernetes. You set up a single-node k3s cluster on node1 and learn to inspect workloads the way you would on call.
+steps:
+- text: 'On `node1`, install k3s. `--node-ip` matters: every Vagrant VM has the same NAT address (10.0.2.15), so you must tell k3s to use the private IP.'
+  code: |
+    curl -sfL https://get.k3s.io | sh -s - --write-kubeconfig-mode 644 --node-ip 192.168.56.11
+    kubectl get nodes -o wide
+  lang: node1
+- text: Create a namespace for the labs and make it the default.
+  code: |
+    kubectl create namespace lab
+    kubectl config set-context --current --namespace=lab
+  lang: node1
+- text: Run a pod and inspect it with the five commands you will use most.
+  code: |
+    kubectl run web --image=nginx:1.27-alpine
+    kubectl get pods -o wide
+    kubectl describe pod web        # read the Events section at the bottom
+    kubectl logs web
+    kubectl exec -it web -- wget -qO- localhost
+  lang: node1
+- text: Generate YAML instead of writing it from memory, then recreate the pod from the file.
+  code: |
+    kubectl run web --image=nginx:1.27-alpine --dry-run=client -o yaml > pod.yaml
+    kubectl delete pod web
+    kubectl apply -f pod.yaml
+    kubectl get pod web -o jsonpath='{.status.podIP}{"\n"}'
+  lang: node1
+- text: 'Use the built-in docs: `kubectl explain pod.spec.containers.ports`. Then delete the pod. A bare pod is not recreated when it dies, which is why the next lab uses Deployments.'
+verify:
+- run: kubectl get nodes
+  expect: '`node1   Ready   control-plane,master`'
+- run: kubectl get pod web
+  expect: '`1/1 Running` (before you delete it).'
+hints:
+- 'To run kubectl from `control`: install kubectl there, copy `/etc/rancher/k3s/k3s.yaml` to `~/.kube/config`, and replace `127.0.0.1` with `192.168.56.11`.'
+solution:
+- text: 'Set this alias to save typing: `echo "alias k=kubectl" >> ~/.bashrc`, then enable completion with `source <(kubectl completion bash)` and `complete -F __start_kubectl k`.'

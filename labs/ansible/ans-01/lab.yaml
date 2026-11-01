@@ -1,0 +1,67 @@
+id: ans-01
+title: Inventory, SSH keys and ad-hoc commands
+track: ansible
+order: 3
+minutes: 40
+breakfix: false
+scenario: The team manages two servers by hand over SSH. Your first job is to make them reachable from `control` with key-based auth, group them in an inventory, and run commands on many hosts at once.
+steps:
+- text: On `control`, create a key pair and copy it to both nodes. The password is `vagrant`.
+  code: |
+    ssh-keygen -t ed25519 -N "" -f ~/.ssh/id_ed25519
+    ssh-copy-id vagrant@node1
+    ssh-copy-id vagrant@node2
+    ssh vagrant@node1 hostname   # no password prompt now
+  lang: control
+- text: Create the project in your home directory, **not** in `/vagrant`. Ansible ignores `ansible.cfg` in world-writable folders, and the synced `/vagrant` folder is one.
+  code: |
+    mkdir -p ~/ansible-lab && cd ~/ansible-lab
+  lang: control
+- text: Write `ansible.cfg`.
+  code: |
+    [defaults]
+    inventory = inventory.ini
+    remote_user = vagrant
+    host_key_checking = False
+    stdout_callback = yaml
+  lang: ansible.cfg
+- text: Write `inventory.ini` with two groups and one parent group.
+  code: |
+    [web]
+    node1 ansible_host=192.168.56.11
+
+    [db]
+    node2 ansible_host=192.168.56.12
+
+    [lab:children]
+    web
+    db
+  lang: inventory.ini
+- text: 'Run ad-hoc commands. Watch the colour of each result: green means no change, yellow means changed, red means failed.'
+  code: |
+    ansible all --list-hosts
+    ansible all -m ping
+    ansible web -a "uptime"
+    ansible all -m setup -a "filter=ansible_distribution*"
+    ansible db -b -m apt -a "name=tree state=present update_cache=true"
+    ansible db -b -m apt -a "name=tree state=present"   # run again
+  lang: control
+- text: '**Challenge:** using only ad-hoc commands, create the user `deploy` on all hosts (module `user`), then remove it with `state=absent`. Use `ansible-doc user` to read the module docs.'
+verify:
+- run: ansible all -m ping
+  expect: 'Both nodes return `SUCCESS` and `"ping": "pong"`.'
+- run: ansible db -b -m apt -a "name=tree state=present"
+  expect: 'Second run shows `"changed": false`. This is idempotency.'
+- run: ansible-config dump --only-changed
+  expect: Shows DEFAULT_HOST_LIST and DEFAULT_REMOTE_USER coming from your ansible.cfg.
+hints:
+- '`UNREACHABLE`: test plain SSH first with `ssh vagrant@192.168.56.11`. If that fails, Ansible will fail too.'
+- 'apt fails with "Permission denied": installing packages needs root. That is what `-b` (become) does.'
+- 'Settings seem ignored: run `ansible --version` and check the "config file =" line.'
+solution:
+- text: 'Challenge solution:'
+  code: |
+    ansible all -b -m user -a "name=deploy shell=/bin/bash state=present"
+    ansible all -a "id deploy"
+    ansible all -b -m user -a "name=deploy state=absent remove=true"
+  lang: control

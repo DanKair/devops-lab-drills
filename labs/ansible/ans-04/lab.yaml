@@ -1,0 +1,66 @@
+id: ans-04
+title: Roles and Ansible Vault for secrets
+track: ansible
+order: 6
+minutes: 60
+breakfix: false
+scenario: The playbook is getting long, and someone pasted an API key into Git in plain text. Split the web setup into a reusable role and move the secret into an encrypted Vault file.
+steps:
+- text: Generate a role skeleton and look at the directory layout.
+  code: |
+    ansible-galaxy role init roles/webserver
+    tree roles/webserver
+  lang: control
+- text: 'Move content into the role: tasks to `roles/webserver/tasks/main.yml` (without the `tasks:` key), the handler to `handlers/main.yml`, the templates to `roles/webserver/templates/`. Put a safe default in `defaults/main.yml`: `http_port: 80`.'
+- text: Shrink the web play in `site.yml`.
+  code: |
+    - name: Configure web servers
+      hosts: web
+      become: true
+      roles:
+        - webserver
+  lang: site.yml
+- text: Turn `group_vars/web.yml` into a directory so plain vars and secrets can live side by side.
+  code: |
+    mkdir -p group_vars/web
+    git mv group_vars/web.yml group_vars/web/vars.yml 2>/dev/null || mv group_vars/web.yml group_vars/web/vars.yml
+    echo 'my-strong-vault-pass' > ~/.vault_pass && chmod 600 ~/.vault_pass
+    ansible-vault create --vault-password-file ~/.vault_pass group_vars/web/vault.yml
+  lang: control
+- text: 'In the editor that opens, add `vault_api_key: "sk-lab-123456"`. Then reference it from plain vars, so a reader of the repo can see the variable exists without seeing its value.'
+  code: |
+    http_port: 8080
+    site_title: "Lab Drills"
+    api_key: "{{ vault_api_key }}"
+  lang: group_vars/web/vars.yml
+- text: Add a task to the role that writes the secret to a root-only file. `no_log` keeps it out of the output.
+  code: |
+    - name: Create app config dir
+      ansible.builtin.file: { path: /etc/lab, state: directory, mode: "0750" }
+
+    - name: Write app secrets
+      ansible.builtin.copy:
+        content: "API_KEY={{ api_key }}\n"
+        dest: /etc/lab/app.env
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+  lang: roles/webserver/tasks/main.yml
+- text: Tell Ansible where the password file is, and keep it out of Git.
+  code: |
+    vault_password_file = ~/.vault_pass
+  lang: ansible.cfg (add under [defaults])
+- text: 'Run the playbook. Then practise the other Vault commands: `ansible-vault view`, `ansible-vault edit`, `ansible-vault rekey`.'
+verify:
+- run: head -1 group_vars/web/vault.yml
+  expect: '`$ANSIBLE_VAULT;1.1;AES256`, so the value is not readable.'
+- run: ansible web -b -a "stat -c '%a %U' /etc/lab/app.env"
+  expect: '`600 root`'
+- run: ansible-playbook site.yml
+  expect: Runs without asking for a password. The secret task shows "output has been hidden".
+hints:
+- '"Attempting to decrypt but no vault secrets found": Ansible does not know the password. Check `vault_password_file` in ansible.cfg or pass `--ask-vault-pass`.'
+- Variables in `roles/webserver/defaults` have the lowest priority, so `group_vars/web/vars.yml` overrides the port.
+solution:
+- text: 'AppSec checklist for this lab: the Vault password never goes in Git (add `.vault_pass` to `.gitignore` anyway), every secret task has `no_log: true`, and secret files are mode 0600. In CI, pass the Vault password as a masked CI/CD variable written to a temp file.'

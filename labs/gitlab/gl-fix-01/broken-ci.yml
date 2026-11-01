@@ -1,0 +1,23 @@
+stages:
+  - test
+  - build
+
+unit-tests:
+  stage: tests
+  image: python:3.12-slim
+  tags: [docker-lab]
+  script:
+    - pip install -r requirements-dev.txt
+    - pytest
+
+build-image:
+  stage: build
+  image: docker:27
+  tags: [lab]
+  script:
+    - docker build -t $CI_REGISTRY_IMAGE:latest .
+    - docker push $CI_REGISTRY_IMAGE:latest
+  only:
+    - main
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"

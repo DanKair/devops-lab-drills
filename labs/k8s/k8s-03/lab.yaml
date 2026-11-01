@@ -1,0 +1,74 @@
+id: k8s-03
+title: ConfigMaps, Secrets, probes and resources
+track: k8s
+order: 14
+minutes: 60
+breakfix: false
+scenario: Config must not be baked into images, secrets must not be in Git, and a hung container must be restarted automatically. You also need resource limits so one app cannot starve the node.
+steps:
+- text: Create config and a secret imperatively. Secrets are only base64-encoded, not encrypted.
+  code: |
+    kubectl create configmap site --from-literal=index.html='<h1>v1 from ConfigMap</h1>'
+    kubectl create secret generic app-secret --from-literal=API_KEY=s3cr3t
+    kubectl get secret app-secret -o jsonpath='{.data.API_KEY}' | base64 -d; echo
+  lang: node1
+- text: Deploy an app that uses both, with probes and resources.
+  code: |
+    apiVersion: apps/v1
+    kind: Deployment
+    metadata:
+      name: app
+    spec:
+      replicas: 2
+      selector:
+        matchLabels: { app: app }
+      template:
+        metadata:
+          labels: { app: app }
+        spec:
+          containers:
+            - name: nginx
+              image: nginx:1.27-alpine
+              ports: [{ containerPort: 80 }]
+              env:
+                - name: API_KEY
+                  valueFrom:
+                    secretKeyRef: { name: app-secret, key: API_KEY }
+              volumeMounts:
+                - name: site
+                  mountPath: /usr/share/nginx/html
+              readinessProbe:
+                httpGet: { path: /, port: 80 }
+                periodSeconds: 5
+              livenessProbe:
+                httpGet: { path: /, port: 80 }
+                initialDelaySeconds: 10
+                periodSeconds: 10
+              resources:
+                requests: { cpu: 50m, memory: 32Mi }
+                limits:   { cpu: 200m, memory: 64Mi }
+          volumes:
+            - name: site
+              configMap: { name: site }
+  lang: app.yaml
+- text: Apply it and check that the env var and the file arrived.
+  code: |
+    kubectl apply -f app.yaml
+    POD=$(kubectl get pods -l app=app -o name | head -1)
+    kubectl exec $POD -- printenv API_KEY
+    kubectl exec $POD -- cat /usr/share/nginx/html/index.html
+  lang: node1
+- text: 'Update the ConfigMap and wait about a minute. The mounted file updates without a restart. Then change the Secret: the env var does **not** update until you run `kubectl rollout restart deploy/app`.'
+  code: |
+    kubectl create configmap site --from-literal=index.html='<h1>v2</h1>' --dry-run=client -o yaml | kubectl apply -f -
+  lang: node1
+- text: 'Break the readiness probe on purpose: change its path to `/healthz` and apply. Watch `READY 0/1` and read the events in `kubectl describe`. Notice that the old pods keep serving traffic, so the rollout stalls safely. Revert afterwards.'
+verify:
+- run: kubectl get pods -l app=app
+  expect: Both pods `1/1 Running`.
+- run: kubectl top pods
+  expect: CPU and memory per pod (k3s ships metrics-server).
+hints:
+- A ConfigMap mounted with `subPath` never auto-updates. Mount the whole directory, as this lab does, if you want live updates.
+solution:
+- text: 'AppSec notes: anyone allowed to `get secrets` in a namespace can read them, so restrict that with RBAC. Turn on encryption at rest for etcd in real clusters. For GitOps, use Sealed Secrets or External Secrets Operator instead of committing plain Secret YAML.'

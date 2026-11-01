@@ -1,0 +1,39 @@
+id: cap-01
+title: 'Ship it: provision, build, scan, deploy'
+track: capstone
+order: 21
+minutes: 240
+breakfix: false
+scenario: Rebuild the whole platform from scratch with code only, then deliver the Python app from `git push` to a running Kubernetes Service. Once it works, break it on purpose and fix it again. This is the kind of project you can describe in an interview.
+steps:
+- text: '**Reset:** `vagrant destroy -f && vagrant up`. From now on, nothing is configured by hand on the nodes.'
+- text: '**Ansible:** write two roles: `k3s` (installs k3s on node1 with `--node-ip`, fetches the kubeconfig to control, replaces 127.0.0.1) and `gitlab_runner` (installs Docker and the runner on node2, registers it with a token from Vault, sets `privileged = true`). One command builds both: `ansible-playbook platform.yml`.'
+- text: '**Terraform:** use the `hashicorp/kubernetes` provider with the fetched kubeconfig to create namespace `shop`, a `ResourceQuota` (for example 1 CPU / 1Gi), and an image pull secret built from a GitLab deploy token passed in as a sensitive variable.'
+- text: '**Kubernetes:** write `k8s/deploy.yaml` for the app: 2 replicas, readiness and liveness probes, resources, `imagePullSecrets`, NodePort 30090, and `securityContext: { runAsNonRoot: true, allowPrivilegeEscalation: false }`.'
+- text: '**GitLab CI:** stages `lint → test → build → deploy`. The deploy job uses image `bitnami/kubectl`, reads a **File**-type variable `KUBECONFIG`, runs on `main` only, uses `environment: production`, and does:'
+  code: |
+    kubectl -n shop apply -f k8s/
+    kubectl -n shop set image deployment/shop app=$CI_REGISTRY_IMAGE:$CI_COMMIT_SHORT_SHA
+    kubectl -n shop rollout status deployment/shop --timeout=120s
+  lang: deploy script
+- text: '**Prove it:** change the app''s response, push to main, and curl `http://192.168.56.11:30090` until the new version appears. Check that the Environments page in GitLab shows the deploy.'
+- text: '**Game day:** ask a friend (or Claude) to break one thing without telling you what: a wrong image tag, a revoked deploy token, a runner tag mismatch, a wrong probe path, an exhausted quota. Fix it using only logs and `describe`. Write a short postmortem for each.'
+- text: Put everything in one Git repo with a README explaining how to rebuild it. That repo is your portfolio piece.
+- text: Tell the CLI where the capstone lives, then check it.
+  code: |-
+    lab config set capstone_project <you>/<capstone-project>   # defaults to gitlab_project
+    lab check cap-01
+  lang: control
+verify:
+- run: git push origin main
+  expect: Pipeline green through deploy; the GitLab Environments page shows production at that SHA.
+- run: kubectl -n shop get deploy shop -o jsonpath='{..image}'
+  expect: '`registry.gitlab.com/.../...:<short sha>` matching the last commit.'
+- run: vagrant destroy -f && vagrant up && ansible-playbook platform.yml
+  expect: Platform comes back with no manual steps.
+hints:
+- 'Pods in `ImagePullBackOff` with "unauthorized": the registry is private and the pod has no `imagePullSecrets`, or the deploy token lacks `read_registry`.'
+- 'Deploy job cannot reach the cluster: the runner on node2 must reach `192.168.56.11:6443`, and the kubeconfig must use that IP, not 127.0.0.1.'
+- 'Pods rejected with "exceeded quota": with a ResourceQuota set, every container must declare requests and limits.'
+solution:
+- text: 'There is no single solution file. Compare with how real teams do it: GitOps tools like Argo CD or Flux pull from Git instead of CI pushing with kubectl. That is a good next track once this works.'

@@ -1,0 +1,18 @@
+- id: setup
+  name: Lab environment
+  blurb: Three Vagrant VMs on VirtualBox, or a lighter WSL2 + Docker setup.
+- id: ansible
+  name: Ansible
+  blurb: Inventory, playbooks, templates, handlers, roles and Vault.
+- id: terraform
+  name: Terraform (IaC)
+  blurb: 'Declarative infra with the Docker provider: state, for_each, modules, drift.'
+- id: k8s
+  name: Kubernetes
+  blurb: 'k3s single node: pods, deployments, services, config, probes, debugging.'
+- id: gitlab
+  name: GitLab CI/CD
+  blurb: From GitHub Actions to .gitlab-ci.yml, your own runner and a container registry.
+- id: capstone
+  name: Capstone
+  blurb: 'Everything together: provision, build, scan, deploy, then break it.'

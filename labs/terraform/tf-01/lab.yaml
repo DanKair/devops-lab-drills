@@ -1,0 +1,79 @@
+id: tf-01
+title: Install Terraform and run your first plan
+track: terraform
+order: 8
+minutes: 45
+breakfix: false
+scenario: 'The team wants infrastructure described as code, reviewed in merge requests, and applied by a tool, not clicked together by hand. You start with the Docker provider: it is free, local, and uses the same workflow as AWS or Azure.'
+steps:
+- text: On `control` (or in WSL), install Docker and Terraform. Log out and back in after `usermod`. [OpenTofu](https://opentofu.org) is an open-source fork with the same commands (`tofu` instead of `terraform`) if you prefer it.
+  code: |
+    curl -fsSL https://get.docker.com | sudo sh
+    sudo usermod -aG docker $USER
+    wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+    echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+    sudo apt update && sudo apt install -y terraform
+    exit   # then: vagrant ssh control
+  lang: control
+- text: Create `~/tf-lab/01/main.tf`.
+  code: |
+    terraform {
+      required_providers {
+        docker = {
+          source  = "kreuzwerker/docker"
+          version = "~> 3.0"
+        }
+      }
+    }
+
+    provider "docker" {}
+
+    resource "docker_image" "nginx" {
+      name         = "nginx:1.27-alpine"
+      keep_locally = false
+    }
+
+    resource "docker_container" "web" {
+      name  = "tf-web"
+      image = docker_image.nginx.image_id
+
+      ports {
+        internal = 80
+        external = 8081
+      }
+    }
+  lang: main.tf
+- text: 'Run the core workflow. Read the plan output carefully: `+` means create, `~` update in place, `-/+` replace.'
+  code: |
+    terraform init
+    terraform fmt
+    terraform validate
+    terraform plan -out tfplan
+    terraform apply tfplan
+  lang: control
+- text: Inspect what Terraform now tracks.
+  code: |
+    terraform state list
+    terraform state show docker_container.web
+    docker ps
+  lang: control
+- text: Change `external = 8081` to `8082` and run `terraform plan`. Find the line that says `# forces replacement`. Some changes can be done in place; this one needs a new container.
+- text: Add a `.gitignore`. State files can hold secrets in plain text and must never be committed.
+  code: |
+    .terraform/
+    *.tfstate
+    *.tfstate.*
+    tfplan
+    crash.log
+  lang: .gitignore
+- text: Run `lab check tf-01` while the container is still running. Once it passes, clean up with `terraform destroy` if you like.
+verify:
+- run: curl -sI http://localhost:8082 | head -1
+  expect: '`HTTP/1.1 200 OK` (before destroy).'
+- run: terraform plan
+  expect: 'Right after an apply: `No changes. Your infrastructure matches the configuration.`'
+hints:
+- '"permission denied while trying to connect to the Docker daemon socket": you did not log out and back in after `usermod -aG docker`.'
+- Never edit `terraform.tfstate` by hand. Use `terraform state` subcommands.
+solution:
+- text: The `.gitignore` above is the important takeaway. Plan files (`tfplan`) also contain secrets, so they stay out of Git too.

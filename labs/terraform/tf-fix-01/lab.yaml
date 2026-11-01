@@ -1,0 +1,56 @@
+id: tf-fix-01
+title: 'Break-fix: drift and a broken config'
+track: terraform
+order: 11
+minutes: 40
+breakfix: true
+scenario: Two incidents land on you on a Monday. (A) Someone "fixed" containers by hand on Friday. (B) A teammate's merge request fails `terraform validate` with three errors.
+steps:
+- text: Make sure lab 2 (`~/tf-lab/02`) is applied, then run `lab start tf-fix-01`. It simulates Friday's incident (deletes `tf-blue`, starts an unmanaged `rogue` container) and creates `~/tf-lab/fix` with the broken config for Part B.
+  code: |-
+    lab start tf-fix-01
+    cd ~/tf-lab/02
+  lang: control
+- text: 'Run `terraform plan -refresh-only`, then `terraform plan`. Answer two questions: what does Terraform want to do about `tf-blue`, and why does it say nothing about `rogue`?'
+- text: Restore the desired state with `terraform apply`.
+- text: '**Stretch:** bring `rogue` under management with an `import` block, and let Terraform generate the config.'
+  code: |
+    import {
+      to = docker_container.rogue
+      id = "PASTE_FULL_CONTAINER_ID"   # docker inspect -f '{{.Id}}' rogue
+    }
+  lang: import.tf
+- text: ''
+  code: |
+    terraform plan -generate-config-out=generated.tf
+  lang: control
+- text: '**Part B.** In `~/tf-lab/fix`, `broken.tf` contains the code below (the provider and image are in `main.tf`). Fix it until `terraform validate` passes.'
+  code: |
+    resource "docker_container" "api" {
+      name  = "tf-api"
+      image = docker_image.nginx.id_image
+
+      ports {
+        internal = 80
+        external = var.api_port
+      }
+    }
+
+    output "api_url" {
+      value = "http://localhost:${docker_container.api.ports.external}"
+    }
+  lang: broken.tf
+verify:
+- run: 'terraform plan   # in 02'
+  expect: '`No changes` after the apply.'
+- run: 'terraform validate   # in fix'
+  expect: '`Success! The configuration is valid.`'
+hints:
+- 'Part A: Terraform only knows about resources in its state. Anything created outside it is invisible until imported.'
+- 'Part B error 1: "Unsupported attribute". Find the correct attribute name in the provider docs for `docker_image`.'
+- 'Part B error 2: "Reference to undeclared input variable".'
+- 'Part B error 3: `ports` is a block that can repeat, so Terraform exposes it as a list.'
+solution:
+- text: |-
+    Part A: Terraform plans to create `tf-blue` again; `rogue` is not in state, so Terraform ignores it.
+    Part B fixes: `image_id` instead of `id_image`; declare `variable "api_port" { type = number, default = 8085 }`; use `docker_container.api.ports[0].external`.

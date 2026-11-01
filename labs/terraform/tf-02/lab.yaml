@@ -1,0 +1,76 @@
+id: tf-02
+title: Variables, outputs, validation and for_each
+track: terraform
+order: 9
+minutes: 50
+breakfix: false
+scenario: Product wants several static sites, one container each, and adding a site should be a one-line change. Hard-coded values must go.
+steps:
+- text: Create `~/tf-lab/02`, copy the `terraform {}` and `provider` blocks from lab 1, then add variables with validation.
+  code: |
+    variable "image" {
+      type    = string
+      default = "nginx:1.27-alpine"
+    }
+
+    variable "sites" {
+      description = "Site name => host port"
+      type        = map(number)
+      default = {
+        blue  = 8091
+        green = 8092
+      }
+
+      validation {
+        condition     = alltrue([for p in values(var.sites) : p > 1024 && p < 65536])
+        error_message = "Use host ports between 1025 and 65535."
+      }
+    }
+  lang: variables.tf
+- text: Create one container per map entry with `for_each`.
+  code: |
+    resource "docker_image" "site" {
+      name         = var.image
+      keep_locally = true
+    }
+
+    resource "docker_container" "site" {
+      for_each = var.sites
+
+      name  = "tf-${each.key}"
+      image = docker_image.site.image_id
+      env   = ["SITE=${each.key}"]
+
+      ports {
+        internal = 80
+        external = each.value
+      }
+    }
+  lang: main.tf
+- text: Expose useful values.
+  code: |
+    output "urls" {
+      value = { for name, port in var.sites : name => "http://localhost:${port}" }
+    }
+  lang: outputs.tf
+- text: Apply, then add a site without touching `.tf` code, using a tfvars file.
+  code: |
+    sites = {
+      blue  = 8091
+      green = 8092
+      red   = 8093
+    }
+  lang: terraform.tfvars
+- text: 'Run `terraform plan`: only `red` should be added. Then test validation with `terraform plan -var=''sites={x=80}''`.'
+- text: '**Think about it:** with `count` and a list `["blue","green","red"]`, removing `green` would shift indexes and recreate `red`. Why does `for_each` with a map avoid that? Write the answer in your notes.'
+verify:
+- run: terraform output -json urls
+  expect: JSON with blue, green and red URLs.
+- run: terraform state list
+  expect: Includes `docker_container.site["red"]`, keyed by name rather than by index.
+- run: terraform plan -var='sites={x=80}'
+  expect: Fails with `Use host ports between 1025 and 65535.`
+hints:
+- 'Precedence of variable values: defaults → terraform.tfvars → *.auto.tfvars → -var-file → -var. The last one wins.'
+solution:
+- text: 'Answer: `for_each` addresses resources by key (`site["red"]`), so removing one key only destroys that resource. `count` addresses by position (`site[2]`), so removing a middle item renumbers everything after it.'

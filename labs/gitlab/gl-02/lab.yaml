@@ -1,0 +1,38 @@
+id: gl-02
+title: Register your own runner on node2
+track: gitlab
+order: 18
+minutes: 45
+breakfix: false
+scenario: Shared runners are slow at peak hours and you want full control over the build environment. Set up a project runner on `node2` with the Docker executor.
+steps:
+- text: On `node2`, install Docker and GitLab Runner.
+  code: |
+    curl -fsSL https://get.docker.com | sudo sh
+    curl -L "https://packages.gitlab.com/install/repositories/runner/gitlab-runner/script.deb.sh" | sudo bash
+    sudo apt install -y gitlab-runner
+    gitlab-runner --version
+  lang: node2
+- text: In GitLab, go to **Settings → CI/CD → Runners → New project runner**. Set tags `lab,docker`, leave "Run untagged jobs" off, and create it. Copy the token (starts with `glrt-`). Treat it like a password.
+- text: Register the runner from node2. Description and tags were already set in the UI.
+  code: |
+    sudo gitlab-runner register --non-interactive \
+      --url https://gitlab.com \
+      --token glrt-REPLACE_ME \
+      --executor docker \
+      --docker-image alpine:3.20
+    sudo gitlab-runner verify
+    sudo gitlab-runner list
+    sudo cat /etc/gitlab-runner/config.toml
+  lang: node2
+- text: 'In the project, turn off **Enable instance runners** so only your runner can pick up jobs. Add `tags: [lab]` to `default:` in your pipeline and push.'
+- text: 'Watch it work on node2 while the job runs: `sudo journalctl -u gitlab-runner -f` and `docker ps`.'
+verify:
+- run: Job log, first lines
+  expect: '`Running with gitlab-runner ... on node2` and `Using Docker executor with image python:3.12-slim`.'
+- run: Settings → CI/CD → Runners
+  expect: Your runner shows a green "online" dot.
+hints:
+- 'Jobs stay pending with "This job is stuck because ... no active runners that match its tags": the job''s tags must all be present on the runner. Compare them exactly.'
+solution:
+- text: 'Runner security: a project runner executes whatever the `.gitlab-ci.yml` says. Never attach a runner with privileged Docker or host access to projects where untrusted people can push or open MRs from forks.'

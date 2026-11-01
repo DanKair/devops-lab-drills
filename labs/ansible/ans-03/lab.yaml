@@ -1,0 +1,66 @@
+id: ans-03
+title: Variables, Jinja2 templates and handlers
+track: ansible
+order: 5
+minutes: 50
+breakfix: false
+scenario: Marketing wants the site on port 8080 with a configurable title. Ops insists nginx reloads **only** when its config actually changes, not on every run.
+steps:
+- text: Create group variables. Ansible loads `group_vars/<group>.yml` automatically.
+  code: |
+    http_port: 8080
+    site_title: "Lab Drills"
+  lang: group_vars/web.yml
+- text: Create two templates.
+  code: |
+    server {
+        listen {{ http_port }};
+        root /var/www/lab;
+        index index.html;
+    }
+  lang: templates/lab.conf.j2
+- text: ''
+  code: |
+    <h1>{{ site_title }}</h1>
+    <p>{{ ansible_facts['hostname'] }} runs {{ ansible_facts['distribution'] }} {{ ansible_facts['distribution_version'] }}</p>
+  lang: templates/index.html.j2
+- text: Replace the tasks in the web play of `site.yml` with these, and add the handler. Keep the nginx install task.
+  code: |2
+      tasks:
+        - name: Install nginx
+          ansible.builtin.apt: { name: nginx, state: present, update_cache: true }
+
+        - name: Create web root
+          ansible.builtin.file: { path: /var/www/lab, state: directory, mode: "0755" }
+
+        - name: Render homepage
+          ansible.builtin.template: { src: index.html.j2, dest: /var/www/lab/index.html, mode: "0644" }
+
+        - name: Render site config
+          ansible.builtin.template: { src: lab.conf.j2, dest: /etc/nginx/sites-available/lab.conf, mode: "0644" }
+          notify: Reload nginx
+
+        - name: Enable site
+          ansible.builtin.file:
+            src: /etc/nginx/sites-available/lab.conf
+            dest: /etc/nginx/sites-enabled/lab.conf
+            state: link
+          notify: Reload nginx
+
+      handlers:
+        - name: Reload nginx
+          ansible.builtin.service: { name: nginx, state: reloaded }
+  lang: site.yml (web play)
+- text: 'Run it. Then change only `site_title` and run it again: the handler must **not** fire, because the config file did not change.'
+- text: 'Override a variable from the CLI and see that extra vars always win: `ansible-playbook site.yml -e http_port=9090`. Then re-run without `-e` to go back to 8080.'
+- text: 'Inspect what Ansible sees for a host: `ansible-inventory --host node1` and `ansible node1 -m debug -a "var=http_port"`.'
+verify:
+- run: curl -s http://node1:8080
+  expect: '`<h1>Lab Drills</h1>` plus the node1 hostname and Ubuntu version.'
+- run: ansible-playbook site.yml
+  expect: 'Second run: `changed=0` and no `RUNNING HANDLER` line.'
+hints:
+- 'Port 8080 does not answer: the default site still listens on 80, which is fine. Check that the symlink exists with `ls -l /etc/nginx/sites-enabled` on node1, then run `sudo nginx -t`.'
+- 'Handlers run once, at the end of the play, even if several tasks notify them. To run them earlier use `ansible.builtin.meta: flush_handlers`.'
+solution:
+- text: 'Variable precedence, simplified from lowest to highest: role defaults → inventory vars → group_vars → host_vars → play vars → role vars → set_fact → extra vars (`-e`). If a value surprises you, debug it with the `debug` module.'

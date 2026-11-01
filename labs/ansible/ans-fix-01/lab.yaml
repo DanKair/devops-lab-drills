@@ -1,0 +1,56 @@
+id: ans-fix-01
+title: 'Break-fix: the status page playbook'
+track: ansible
+order: 7
+minutes: 30
+breakfix: true
+scenario: A colleague says, "I wrote this playbook but it doesn't work, can you look before standup?" It contains **four** separate bugs. Fix them one at a time, and read each error message completely before changing anything.
+steps:
+- text: 'Restore the clean snapshot (`vagrant snapshot restore clean`) and re-copy your SSH keys. Then run `lab start ans-fix-01`: it writes this file to `~/ansible-lab/status.yml` (your old copy is backed up) and removes any old status page from node1.'
+  code: |
+    - name: Deploy status page
+      hosts: webservers
+      tasks:
+        - name: Install nginx
+          ansible.builtin.apt:
+            name: nginx
+            state: present
+            update_cache: true
+
+        - name: Write status page
+          ansible.builtin.copy:
+            content: "OK"
+            dest: /var/www/html/status.html
+          notify: restart nginx
+
+        - name: Start nginx
+          ansible.builtin.service:
+            name: nginx
+            state: start
+
+      handlers:
+        - name: Restart nginx
+          ansible.builtin.service:
+            name: nginx
+            state: restarted
+  lang: status.yml
+- text: Run `ansible-playbook status.yml`. Write down the first symptom. Note that one of the bugs does not even produce a red error.
+- text: Fix, re-run, and repeat until the playbook is green and idempotent.
+- text: 'For each bug, write one sentence: what the symptom was and which part of the output pointed you to it. This is the habit that makes you fast at troubleshooting.'
+verify:
+- run: ansible-playbook status.yml
+  expect: Completes with `failed=0`, and the handler runs on the first run only.
+- run: curl -s http://node1/status.html
+  expect: '`OK`'
+hints:
+- 'Bug 1 hides in a warning, not an error: "Could not match supplied host pattern". Which groups exist in your inventory?'
+- 'Bug 2: "Permission denied" or "Could not open lock file". What is missing at play level?'
+- 'Bug 3: "value of state must be one of ...". Read the allowed values.'
+- 'Bug 4: "The requested handler ... was not found". Compare the two names character by character.'
+solution:
+- text: |-
+    Fixes:
+    1. `hosts: webservers` → `hosts: web`. No hosts matched, so nothing ran at all.
+    2. Add `become: true` to the play, because apt needs root.
+    3. `state: start` → `state: started`.
+    4. `notify: restart nginx` → `notify: Restart nginx`, because handler names are case-sensitive.

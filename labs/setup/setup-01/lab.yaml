@@ -1,0 +1,91 @@
+id: setup-01
+title: Build the homelab with Vagrant + VirtualBox
+track: setup
+order: 1
+minutes: 45
+breakfix: false
+scenario: 'You joined a small team as a junior DevOps engineer. Before touching production, you need a disposable lab: one **control** machine you work from and two **nodes** you configure. Everything must be rebuildable with one command.'
+steps:
+- text: Install [VirtualBox 7.x](https://www.virtualbox.org/wiki/Downloads) and [Vagrant](https://developer.hashicorp.com/vagrant/install). The full lab uses about 5.5 GB of RAM, so you need at least 8 GB on the host (16 GB is comfortable). On Windows with WSL2/Hyper-V enabled, VirtualBox still works but runs slower; if it is unusable, follow the WSL2 lab instead.
+- text: 'Clone this repo on your host (on Windows, clone it in a normal folder, not inside WSL). The repo root contains this `Vagrantfile`. Besides the three VMs, it installs the `lab` CLI on `control` from the synced `/vagrant` folder. Note the `00-lab.conf` drop-in: Ubuntu reads sshd drop-ins alphabetically and the *first* value wins, so the file must sort before the cloud-image default.'
+  code: |
+    # DevOps Lab Drills homelab: control + node1 + node2 on a VirtualBox host-only network.
+    # Needs ~5.5 GB free RAM. The repo folder is synced to /vagrant, and the `lab` CLI
+    # is installed on control in editable mode, so edits to labs/ apply immediately.
+    Vagrant.configure("2") do |config|
+      config.vm.box = "bento/ubuntu-24.04"
+
+      machines = {
+        "control" => { ip: "192.168.56.10", mem: 2048 },
+        "node1"   => { ip: "192.168.56.11", mem: 2048 },
+        "node2"   => { ip: "192.168.56.12", mem: 1536 },
+      }
+
+      machines.each do |name, spec|
+        config.vm.define name do |m|
+          m.vm.hostname = name
+          m.vm.network "private_network", ip: spec[:ip]
+          m.vm.provider "virtualbox" do |vb|
+            vb.name   = "lab-#{name}"
+            vb.memory = spec[:mem]
+            vb.cpus   = 2
+          end
+          # Password SSH stays on so ans-01 can teach ssh-copy-id. sshd uses the first
+          # value it reads and drop-ins load alphabetically, hence the 00- prefix.
+          m.vm.provision "shell", inline: <<-SHELL
+            echo "PasswordAuthentication yes" > /etc/ssh/sshd_config.d/00-lab.conf
+            systemctl restart ssh
+            grep -q lab-hosts /etc/hosts || printf '%s\n' '# lab-hosts' \
+              '192.168.56.10 control' '192.168.56.11 node1' '192.168.56.12 node2' >> /etc/hosts
+          SHELL
+          if name == "control"
+            m.vm.provision "shell", inline: <<-SHELL
+              apt-get update
+              apt-get install -y ansible git curl jq pipx
+              sudo -u vagrant -H bash -lc 'pipx ensurepath && pipx install --force --editable /vagrant'
+              echo "Done. Next: vagrant ssh control, then run: lab doctor"
+            SHELL
+          end
+        end
+      end
+    end
+  lang: Vagrantfile
+- text: Bring the lab up and log in to the control machine.
+  code: |
+    git clone https://github.com/<you>/devops-lab-drills.git
+    cd devops-lab-drills
+    vagrant up
+    vagrant status
+    vagrant ssh control
+  lang: host shell
+- text: From `control`, check the network and the CLI. `lab doctor` shows what is ready and what later labs will set up.
+  code: |
+    ping -c 2 node1
+    ping -c 2 node2
+    lab doctor
+    lab check setup-01
+  lang: control
+- text: Save a clean snapshot of every VM. Before each break-fix lab you will restore this snapshot, so this step matters.
+  code: |
+    vagrant snapshot save clean
+    vagrant snapshot list
+    # later, to reset everything:
+    # vagrant snapshot restore clean
+  lang: host shell
+- text: 'Learn the daily commands: `vagrant halt` (stop), `vagrant up` (start), `vagrant destroy -f` (delete everything), `vagrant provision` (re-run the shell scripts).'
+verify:
+- run: vagrant status
+  expect: control, node1 and node2 all show `running (virtualbox)`.
+- run: vagrant ssh control -c "ping -c1 node2"
+  expect: 1 packets transmitted, 1 received.
+- run: vagrant snapshot list
+  expect: Each machine lists a snapshot named `clean`.
+hints:
+- If `vagrant up` fails with "VT-x is not available", enable virtualization (Intel VT-x / AMD-V) in BIOS/UEFI.
+- 'Error about the host-only network range: VirtualBox only allows 192.168.56.0/21 by default. The IPs used here are inside that range, so check for typos.'
+- On Windows, run the commands in PowerShell from the folder that contains the Vagrantfile, not inside WSL. Vagrant in WSL needs extra setup.
+solution:
+- text: 'There is nothing tricky to solve here. If one VM is broken, rebuild only that one:'
+  code: |
+    vagrant destroy -f node2 && vagrant up node2
+  lang: host shell

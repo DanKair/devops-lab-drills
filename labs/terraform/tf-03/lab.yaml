@@ -1,0 +1,83 @@
+id: tf-03
+title: 'Modules: one definition, dev and prod'
+track: terraform
+order: 10
+minutes: 50
+breakfix: false
+scenario: Dev and prod should be built from the same code with different inputs. Copy-paste between environments is how they drift apart.
+steps:
+- text: Create a module at `~/tf-lab/03/modules/web/`. Child modules must declare their own `required_providers`.
+  code: |
+    terraform {
+      required_providers {
+        docker = { source = "kreuzwerker/docker" }
+      }
+    }
+
+    resource "docker_image" "this" {
+      name         = var.image
+      keep_locally = true
+    }
+
+    resource "docker_container" "this" {
+      name    = "${var.env}-web"
+      image   = docker_image.this.image_id
+      env     = ["APP_ENV=${var.env}"]
+      restart = "unless-stopped"
+
+      ports {
+        internal = 80
+        external = var.port
+      }
+    }
+  lang: modules/web/main.tf
+- text: ''
+  code: |
+    variable "env"   { type = string }
+    variable "port"  { type = number }
+    variable "image" {
+      type    = string
+      default = "nginx:1.27-alpine"
+    }
+  lang: modules/web/variables.tf
+- text: ''
+  code: |
+    output "url" { value = "http://localhost:${var.port}" }
+  lang: modules/web/outputs.tf
+- text: Call the module twice from the root.
+  code: |
+    terraform {
+      required_providers {
+        docker = { source = "kreuzwerker/docker", version = "~> 3.0" }
+      }
+    }
+    provider "docker" {}
+
+    module "dev" {
+      source = "./modules/web"
+      env    = "dev"
+      port   = 9001
+    }
+
+    module "prod" {
+      source = "./modules/web"
+      env    = "prod"
+      port   = 9002
+      image  = "nginx:1.26-alpine"
+    }
+
+    output "urls" {
+      value = { dev = module.dev.url, prod = module.prod.url }
+    }
+  lang: main.tf (root)
+- text: Run `terraform init` (it is required whenever you add a module), then apply. Look at the addresses in `terraform state list`.
+- text: 'Destroy only dev with `terraform destroy -target=module.dev`. Run `terraform plan`: Terraform wants dev back. Apply again. Note that `-target` is for emergencies and learning, not for daily work.'
+verify:
+- run: terraform state list
+  expect: '`module.dev.docker_container.this` and `module.prod.docker_container.this`.'
+- run: docker exec prod-web printenv APP_ENV
+  expect: '`prod`'
+hints:
+- 'Error "Failed to query available provider packages ... hashicorp/docker": a child module without `required_providers` makes Terraform guess the `hashicorp` namespace, and no such provider exists.'
+solution:
+- text: In real teams, state lives in a remote backend (S3, GitLab-managed Terraform state, Terraform Cloud) with locking, so two people cannot apply at once. GitLab offers free managed Terraform state per project. Try it after the GitLab track.

@@ -1,0 +1,133 @@
+<div class="app">
+  <aside>
+    <a class="brand" href="#home">DevOps Lab Drills<small>Hands-on labs, checked by the <code>lab</code> CLI</small></a>
+    <div class="meter"><i id="gbar"></i></div>
+    <div class="meter-label" id="glabel"></div>
+    <details id="navbox" open><summary id="navsum">All labs</summary><nav id="nav"></nav></details>
+  </aside>
+  <main><div class="sheet" id="view"></div></main>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+/*__DATA__*/
+const TRACKS = DATA.tracks, LABS = DATA.labs, REPO = DATA.repo;
+const KEY = 'dld-progress-v1';
+let P = {};
+try { P = JSON.parse(localStorage.getItem(KEY) || '{}') || {}; } catch (e) { P = {}; }
+function save() { try { localStorage.setItem(KEY, JSON.stringify(P)); } catch (e) {} }
+const esc = s => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const byId = Object.fromEntries(LABS.map(l => [l.id, l]));
+const st = id => P[id] || (P[id] = { steps: [], done: false });
+function status(l) { const s = P[l.id]; if (!s) return ''; if (s.done) return 'done'; return (s.steps || []).some(Boolean) ? 'part' : ''; }
+function codeBlock(c, l) { return `<div class="code"><div class="code-head"><span>${esc(l || '')}</span><button class="copy" type="button">Copy</button></div><pre><code>${esc(c)}</code></pre></div>`; }
+const tc = t => `--tc:var(--t-${t})`;
+
+function renderNav(cur) {
+  document.getElementById('nav').innerHTML = TRACKS.map(t => {
+    const ls = LABS.filter(l => l.track === t.id);
+    const d = ls.filter(l => status(l) === 'done').length;
+    return `<div class="track" style="${tc(t.id)}"><h3>${esc(t.name)}<span>${d}/${ls.length}</span></h3><ul>${ls.map(l => `<li><a href="#${l.id}" class="${l.id === cur ? 'cur' : ''}"><span class="dot ${status(l)}"></span><span>${esc(l.title)}</span>${l.breakfix ? '<span class="fixtag">fix</span>' : ''}</a></li>`).join('')}</ul></div>`;
+  }).join('');
+  const done = LABS.filter(l => status(l) === 'done').length;
+  document.getElementById('gbar').style.width = (done / LABS.length * 100) + '%';
+  document.getElementById('glabel').textContent = `${done} of ${LABS.length} labs complete`;
+  document.getElementById('navsum').textContent = `All labs · ${done}/${LABS.length}`;
+}
+
+function renderHome() {
+  const v = document.getElementById('view'); v.style.cssText = '';
+  const totalMin = LABS.reduce((a, l) => a + l.minutes, 0);
+  v.innerHTML = `
+  <p class="meta"><span class="chip" style="--tc:var(--accent)">${LABS.length} labs</span><span>${LABS.filter(l => l.breakfix).length} break-fix scenarios · about ${Math.round(totalMin / 60)} hours of hands-on work</span></p>
+  <h1>DevOps Lab Drills</h1>
+  <p class="lede">Hands-on labs for Ansible, Terraform, Kubernetes and GitLab CI that run on your own Vagrant VMs. Read a lab here, do it in your terminal, and let the <code>lab</code> CLI check your environment, the same way Test My Code checks MOOC exercises.</p>
+  <h2>How a lab works</h2>
+  <div class="flow"><span>lab start</span><span>Read scenario</span><span>Do the tasks</span><span>lab check</span><span>lab hint</span><span>Next lab</span></div>
+  <p>Every lab has an automated check. It looks at the real state of your machines: is nginx answering on node1, does Terraform plan show no drift, are all pods ready, did the last pipeline pass. Break-fix labs start with <code>lab start</code>, which builds the broken state for you.</p>
+  <h2>Install the CLI on your control VM</h2>
+  ${codeBlock(`sudo apt install -y pipx git && pipx ensurepath\npipx install git+${REPO}.git\nlab doctor\nlab show setup-01`, 'control')}
+  <p class="note">Using the repo's Vagrantfile? It installs the CLI for you from the synced <code>/vagrant</code> folder. See the README for the full setup guide.</p>
+  <h2>Tracks</h2>
+  <div class="routes">${TRACKS.map(t => { const ls = LABS.filter(l => l.track === t.id); const d = ls.filter(l => status(l) === 'done').length; const next = ls.find(l => status(l) !== 'done') || ls[0]; return `<a class="route" href="#${next.id}" style="${tc(t.id)}"><h4>${esc(t.name)}</h4><p>${esc(t.blurb)}</p><div class="meter"><i style="width:${d / ls.length * 100}%"></i></div><p>${d}/${ls.length} done · next: ${esc(next.title)}</p></a>`; }).join('')}</div>
+  <h2>Sync progress from the CLI</h2>
+  <p>Run <code>lab export</code> on the control VM and paste the code here. Labs that passed <code>lab check</code> are marked complete in this browser.</p>
+  <div class="import"><input id="importcode" type="text" placeholder="LD1.eyJ2Ijox…" aria-label="Progress code from lab export" autocomplete="off"><button class="btn primary" type="button" id="importbtn">Import</button></div>
+  <h2>Suggested schedule</h2>
+  <div class="tbl"><table><tr><th>Week</th><th>Focus</th><th>Why this order</th></tr>
+  <tr><td>1</td><td>Lab environment + Ansible</td><td>You already know Linux; Ansible automates what you do by hand.</td></tr>
+  <tr><td>2</td><td>Terraform</td><td>Declarative thinking and state, needed for everything cloud.</td></tr>
+  <tr><td>3–4</td><td>Kubernetes</td><td>The biggest topic. Spend time on the break-fix labs.</td></tr>
+  <tr><td>5</td><td>GitLab CI/CD</td><td>Fast if you know GitHub Actions; concepts map directly.</td></tr>
+  <tr><td>6</td><td>Capstone</td><td>Ties everything into one portfolio repo.</td></tr></table></div>
+  <div class="actions"><a class="btn primary" href="#setup-01">Start with the lab environment</a><a class="btn" href="${REPO}" target="_blank" rel="noopener">Source on GitHub</a><button class="btn" type="button" id="reset">Reset browser progress</button></div>`;
+  document.getElementById('reset').onclick = e => { const b = e.currentTarget; if (b.dataset.armed) { P = {}; save(); renderNav(''); renderHome(); toast('Progress reset'); } else { b.dataset.armed = 1; b.textContent = 'Click again to confirm reset'; } };
+  document.getElementById('importbtn').onclick = () => {
+    const raw = document.getElementById('importcode').value.trim();
+    try {
+      if (!raw.startsWith('LD1.')) throw new Error('bad prefix');
+      let b = raw.slice(4).replace(/-/g, '+').replace(/_/g, '/'); b += '='.repeat((4 - b.length % 4) % 4);
+      const data = JSON.parse(atob(b)); let n = 0;
+      (data.done || []).forEach(id => { if (byId[id]) { st(id).done = true; n++; } });
+      save(); renderNav(''); renderHome(); toast(`Imported ${n} completed lab${n === 1 ? '' : 's'}`);
+    } catch (e) { toast('That code is not valid. Copy the full output of `lab export`.'); }
+  };
+}
+
+function renderLab(l) {
+  const v = document.getElementById('view'); const s = st(l.id); const tr = TRACKS.find(t => t.id === l.track);
+  const i = LABS.indexOf(l), prev = LABS[i - 1], next = LABS[i + 1];
+  let n = 0;
+  const steps = l.steps.map(x => {
+    if (!x.html && x.code) return `<li class="cont"><div class="body">${codeBlock(x.code, x.lang)}</div></li>`;
+    const idx = n++; const chk = !!(s.steps || [])[idx];
+    return `<li class="${chk ? 'checked' : ''}"><input type="checkbox" id="s-${l.id}-${idx}" data-i="${idx}" ${chk ? 'checked' : ''} aria-label="Mark task ${idx + 1} done"><div class="body"><div class="txt" data-n="${idx + 1}.">${x.html}</div>${x.code ? codeBlock(x.code, x.lang) : ''}</div></li>`;
+  }).join('');
+  const cli = (l.has_setup ? `lab start ${l.id}\n` : '') + `lab check ${l.id}`;
+  v.style.cssText = tc(l.track);
+  v.innerHTML = `
+  <p class="meta"><span class="chip">${esc(tr.name)}</span>${l.breakfix ? '<span class="chip fix">break-fix</span>' : ''}<span>~${l.minutes} min</span><span>Lab ${i + 1} of ${LABS.length}</span></p>
+  <h1>${esc(l.title)}</h1>
+  <div class="scenario"><b>Scenario</b>${l.scenario}</div>
+  ${codeBlock(cli, 'run on control')}
+  <h2>Tasks</h2><ol class="steps">${steps}</ol>
+  <h2>Checked automatically</h2>
+  <p class="note"><code>lab check ${l.id}</code> verifies these ${l.checks.length} things. They describe the end state, not the steps.</p>
+  <ul class="checklist">${l.checks.map(c => `<li>${esc(c)}</li>`).join('')}</ul>
+  <h2>Verify by hand</h2><div class="verify">${l.verify.map(x => `<div class="vrow">${codeBlock(x.run, 'run')}<div class="exp"><strong>Expect</strong>${x.html}</div></div>`).join('')}</div>
+  <h2>Hints</h2>${l.hints.map((h, k) => `<details class="hint"><summary>Hint ${k + 1}</summary><div>${h}</div></details>`).join('')}
+  <details class="sol"><summary>${l.breakfix ? 'Show the fixes' : 'Solution and notes'}</summary><div>${l.solution.map(x => `${x.html || ''}${x.code ? codeBlock(x.code, x.lang) : ''}`).join('')}</div></details>
+  <div class="actions"><button class="btn ${s.done ? 'done' : 'primary'}" type="button" id="done">${s.done ? 'Completed ✓ (undo)' : 'Mark lab complete'}</button><button class="btn" type="button" id="prompt">Copy review prompt</button><a class="btn" href="${REPO}/tree/main/labs/${l.track}/${l.id}" target="_blank" rel="noopener">Lab source</a></div>
+  <div class="pager">${prev ? `<a href="#${prev.id}"><small>Previous</small>${esc(prev.title)}</a>` : '<span></span>'}${next ? `<a href="#${next.id}" style="text-align:right"><small>Next</small>${esc(next.title)}</a>` : '<a href="#home" style="text-align:right"><small>Finished</small>Back to overview</a>'}</div>`;
+  v.querySelectorAll('.steps input').forEach(cb => cb.onchange = () => { s.steps = s.steps || []; s.steps[+cb.dataset.i] = cb.checked; cb.closest('li').classList.toggle('checked', cb.checked); save(); renderNav(l.id); });
+  document.getElementById('done').onclick = () => { s.done = !s.done; save(); renderNav(l.id); renderLab(l); if (s.done) toast('Lab marked complete'); };
+  document.getElementById('prompt').onclick = () => {
+    const tmp = document.createElement('div'); tmp.innerHTML = l.scenario;
+    copyText(`I'm a DevOps beginner doing a hands-on lab: "${l.title}" (${tr.name}).\nScenario: ${tmp.textContent.trim()}\n\nHere is the output of \`lab check ${l.id}\` and what I tried:\n<PASTE HERE>\n\nDon't give me the full solution. Tell me which part looks wrong and give me one hint or one command to investigate next.`, 'Review prompt copied');
+  };
+}
+
+function copyText(t, msg) {
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(() => toast(msg || 'Copied'), () => toast('Copy blocked: select the text manually'));
+  else toast('Copy blocked: select the text manually');
+}
+let tt; function toast(m) { const e = document.getElementById('toast'); e.textContent = m; e.hidden = false; clearTimeout(tt); tt = setTimeout(() => e.hidden = true, 2200); }
+document.addEventListener('click', e => {
+  const b = e.target.closest('.copy'); if (!b) return;
+  const code = b.closest('.code').querySelector('code');
+  const sel = () => { const r = document.createRange(); r.selectNodeContents(code); const s = getSelection(); s.removeAllRanges(); s.addRange(r); toast('Selected: press Ctrl+C'); };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(code.textContent).then(() => { b.textContent = 'Copied'; setTimeout(() => b.textContent = 'Copy', 1200); }, sel); else sel();
+});
+const narrow = window.matchMedia('(max-width:860px)');
+function route() {
+  const l = byId[location.hash.slice(1)];
+  if (l) { renderLab(l); renderNav(l.id); } else { renderHome(); renderNav(''); }
+  if (narrow.matches) document.getElementById('navbox').open = false;
+  window.scrollTo(0, 0);
+}
+if (narrow.addEventListener) narrow.addEventListener('change', () => { document.getElementById('navbox').open = !narrow.matches; });
+window.addEventListener('hashchange', route);
+route();
+</script>
+</body>
+</html>
